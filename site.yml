@@ -1,0 +1,6 @@
+
+- name: Windows Failover Cluster Demo
+  hosts: windows_cluster_nodes # Inventory group for cluster nodes.
+  gather_facts: true # Gather facts for baseline OS info used by Ansible.
+  roles:
+    - win_failover_cluster # Main role that installs features, validates, and configures the cluster.

@@ -1,0 +1,38 @@
+# Ensure all nodes are on the same OS build before cluster creation.
+- name: Collect OS build info (all nodes)
+  win_cluster_build_info:
+  # Custom module returns build_number/ubr/display_version for alignment checks.
+  register: cluster_build_info
+  changed_when: false
+
+- name: Parse OS build info (all nodes)
+  set_fact:
+    cluster_build: >-
+      {{
+        {
+          "BuildNumber": cluster_build_info.build_number,
+          "UBR": cluster_build_info.ubr,
+          "DisplayVersion": cluster_build_info.display_version
+        }
+      }}
+  changed_when: false
+
+- name: Ensure cluster nodes are on the same build (primary-only)
+  assert:
+    that:
+      - cluster_builds | select('none') | list | length == 0
+      - cluster_builds | map(attribute='BuildNumber') | unique | length == 1
+      - cluster_builds | map(attribute='UBR') | unique | length == 1
+      - cluster_builds | map(attribute='DisplayVersion') | unique | length == 1
+    fail_msg: >-
+      Cluster nodes are not on the same Windows build or build info could not be read.
+      Ensure updates/reboots completed and all nodes are reachable.
+  vars:
+    cluster_builds: >-
+      {{
+        cluster_nodes
+        | map('extract', hostvars)
+        | map(attribute='cluster_build', default=None)
+        | list
+      }}
+  when: inventory_hostname == cluster_primary

@@ -1,0 +1,7 @@
+# Apply Windows updates across all nodes when enabled.
+- name: Install Windows updates (all nodes)
+  win_updates:
+    category_names: "{{ cluster_update_categories }}" # Update categories to install.
+    reboot: "{{ cluster_update_reboot }}" # Auto-reboot when required by updates.
+    reboot_timeout: "{{ cluster_update_reboot_timeout }}" # Seconds to wait for reboot.
+  when: cluster_update_enabled # true: apply updates; false: skip patching step

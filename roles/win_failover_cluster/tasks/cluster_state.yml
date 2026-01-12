@@ -1,0 +1,118 @@
+# Check cluster existence and membership once, then expose reusable facts.
+- name: Check cluster state by name (primary-only)
+  win_cluster_info:
+    name: "{{ cluster_name }}" # Cluster name to query.
+  register: cluster_info
+  when: inventory_hostname == cluster_primary
+  changed_when: false
+  # win_cluster_info returns: { exists: true/false, module_present: true/false }
+
+- name: Check local cluster membership (all nodes)
+  win_cluster_membership_info:
+  register: cluster_membership
+  changed_when: false
+
+- name: Record local cluster membership (all nodes)
+  set_fact:
+    cluster_member: "{{ cluster_membership.member | default(false) }}" # Node is part of a cluster.
+    cluster_member_name: "{{ cluster_membership.cluster_name | default('') }}" # Node cluster name, if any.
+    cluster_member_report: >-
+      {{
+        inventory_hostname ~ "=" ~ (cluster_membership.cluster_name | default('')) if (cluster_membership.member | default(false)) else ""
+      }}
+    cluster_registry_fallback_used: "{{ cluster_membership.registry_fallback_used | default(false) }}" # True when registry fallback was used.
+  changed_when: false
+
+- name: Initialize fallback node list (primary-only)
+  set_fact:
+    fallback_nodes: []
+    fallback_reports: []
+  when: inventory_hostname == cluster_primary
+  changed_when: false
+
+- name: Collect nodes using registry fallback (primary-only)
+  set_fact:
+    fallback_nodes: >-
+      {{
+        fallback_nodes
+        + ([item] if (hostvars[item].cluster_registry_fallback_used | default(false)) else [])
+      }}
+    fallback_reports: >-
+      {{
+        fallback_reports
+        + ([hostvars[item].cluster_member_report] if (hostvars[item].cluster_registry_fallback_used | default(false)) else [])
+      }}
+  loop: "{{ cluster_nodes }}"
+  when: inventory_hostname == cluster_primary
+  changed_when: false
+
+- name: Fail when registry fallback is disabled and module is missing (primary-only)
+  assert:
+    that:
+      - fallback_nodes | length == 0
+    fail_msg: >-
+      FailoverClusters module is missing on: {{ fallback_nodes }}. Install the feature or enable cluster_allow_registry_fallback.
+  when:
+    - inventory_hostname == cluster_primary
+    - not cluster_allow_registry_fallback | bool
+
+- name: Summarize cluster presence (primary-only)
+  set_fact:
+    cluster_present: >-
+      {{
+        (cluster_info.exists | default(false))
+        or
+        (
+          cluster_nodes
+          | map('extract', hostvars)
+          | map(attribute='cluster_member_name', default='')
+          | select('equalto', cluster_name)
+          | list
+          | length > 0
+        )
+      }}
+    cluster_module_present: "{{ cluster_info.module_present | default(true) }}" # Track module availability on primary.
+  when: inventory_hostname == cluster_primary
+  changed_when: false
+
+- name: Share cluster presence with all nodes
+  set_fact:
+    cluster_present: "{{ cluster_present }}"
+    cluster_module_present: "{{ cluster_module_present | default(true) }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ cluster_nodes }}"
+  when: inventory_hostname == cluster_primary
+  changed_when: false
+
+- name: Fail when any node belongs to a different cluster (primary-only)
+  assert:
+    that:
+      - cluster_conflicts | length == 0
+    fail_msg: >-
+      One or more nodes already belong to a different cluster: {{ cluster_conflicts }}
+  vars:
+    cluster_conflicts: >-
+      {{
+        cluster_nodes
+        | map('extract', hostvars)
+        | selectattr('cluster_member', 'defined')
+        | selectattr('cluster_member')
+        | selectattr('cluster_member_name', 'defined')
+        | rejectattr('cluster_member_name', 'equalto', cluster_name)
+        | map(attribute='cluster_member_report')
+        | list
+      }}
+  when: inventory_hostname == cluster_primary
+
+- name: Report possible stale cluster registry entries (primary-only)
+  debug:
+    msg: >-
+      Registry-based cluster membership detected on: {{ fallback_nodes }}.
+      Details: {{ fallback_reports }}.
+      If these nodes are not in the intended cluster, clean up stale cluster state
+      (for example, remove the node from the old cluster and clear HKLM:\\Cluster\\ClusterName),
+      then rerun. Set cluster_allow_registry_fallback=false to fail instead of assuming membership.
+  when:
+    - inventory_hostname == cluster_primary
+    - fallback_nodes | length > 0

@@ -1,0 +1,13 @@
+# Validate cluster readiness with Test-Cluster (primary-only).
+- name: Validate cluster readiness with Test-Cluster (primary-only)
+  win_cluster_validate:
+    nodes: "{{ cluster_nodes }}"
+    include: "{{ cluster_validation_include }}"
+    skip: "{{ cluster_validation_skip }}"
+    module_name: "{{ cluster_ps_module }}"
+  # Custom module runs Test-Cluster and fails when validation does not succeed.
+  register: cluster_validation
+  changed_when: false
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_validation_enabled # true: run Test-Cluster; false: skip validation

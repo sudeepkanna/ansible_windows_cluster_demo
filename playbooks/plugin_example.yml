@@ -1,0 +1,15 @@
+# Playbook: Demonstrate controller-side action plugin.
+# Purpose: Run the example action plugin on the Ansible controller (localhost).
+- name: Controller-side action plugin example
+  hosts: localhost # Run on controller.
+  connection: local # Keep execution local to the controller.
+  gather_facts: false # No facts needed for plugin demo.
+  tasks:
+    - name: Run action plugin (controller)
+      win_cluster_example: # Action plugin runs on controller, not Windows hosts.
+      register: plugin_result # Capture plugin output.
+      # This calls plugins/action/win_cluster_example.py on the controller and registers its result.
+
+    - name: Show plugin message
+      debug:
+        var: plugin_result.msg # Show message from the plugin.

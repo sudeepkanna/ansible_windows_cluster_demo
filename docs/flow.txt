@@ -1,0 +1,177 @@
+Cluster Workflow (with tasks/modules/conditions)
+
+Cluster PRESENT
+[START]
+  |
+  v
++---------------------------------------------+
+| Determine primary                            |
+| File: roles/win_failover_cluster/tasks/main.yml
+| Task: "Determine primary node"               |
+| Module: set_fact                             |
+| Condition: always                            |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Preflight variables                          |
+| File: roles/win_failover_cluster/tasks/preflight.yml
+| Task: "Validate cluster inputs"              |
+| Module: assert                               |
+| Condition: always                            |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Cluster state + membership                   |
+| File: roles/win_failover_cluster/tasks/cluster_state.yml
+| Task: "Check cluster state by name"          |
+| Module: win_cluster_info                     |
+| Condition: inventory_hostname==cluster_primary
+| Task: "Check local cluster membership"       |
+| Module: win_cluster_membership_info          |
+| Condition: all nodes                         |
+| Task: "Fail when node in other cluster"      |
+| Module: assert                               |
+| Condition: primary AND cluster_present=false |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Quorum report (primary only)                 |
+| File: roles/win_failover_cluster/tasks/cluster_report.yml
+| Task: "Ensure FailoverClusters module"       |
+| Module: win_cluster_module_check             |
+| Condition: cluster_present=true              |
+| Task: "Get current quorum config"            |
+| Module: win_cluster_quorum_info              |
+| Condition: primary                           |
++---------------------------------------------+
+  |
+  v
++----------------------+
+| DONE (no changes)    |
++----------------------+
+
+Cluster NOT PRESENT
+[START]
+  |
+  v
++---------------------------------------------+
+| Determine primary                            |
+| File: roles/win_failover_cluster/tasks/main.yml
+| Task: "Determine primary node"               |
+| Module: set_fact                             |
+| Condition: always                            |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Preflight variables                          |
+| File: roles/win_failover_cluster/tasks/preflight.yml
+| Task: "Validate cluster inputs"              |
+| Module: assert                               |
+| Condition: always                            |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Cluster state + membership                   |
+| File: roles/win_failover_cluster/tasks/cluster_state.yml
+| Task: "Check cluster state by name"          |
+| Module: win_cluster_info                     |
+| Condition: primary                           |
+| Task: "Check local cluster membership"       |
+| Module: win_cluster_membership_info          |
+| Condition: all nodes                         |
+| Task: "Fail when node in other cluster"      |
+| Module: assert                               |
+| Condition: primary AND cluster_present=false |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| TCP port checks (all nodes)                  |
+| File: roles/win_failover_cluster/tasks/network.yml
+| Task: "Check TCP connectivity to peers"      |
+| Module: win_cluster_port_check               |
+| Condition: cluster_present=false             |
+| Task: "Ensure all nodes can reach peers"     |
+| Module: assert                               |
+| Condition: primary                           |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Install features/module                      |
+| File: roles/win_failover_cluster/tasks/features.yml
+| Task: "Ensure Failover Clustering features"  |
+| Module: win_feature                          |
+| Condition: cluster_present=false             |
+| Task: "Ensure FailoverClusters module"       |
+| Module: win_cluster_module_check             |
+| Condition: cluster_present=false             |
+| FAIL -> stop (if prereqs not satisfied)      |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Windows updates (optional)                   |
+| File: roles/win_failover_cluster/tasks/updates.yml
+| Task: "Install Windows updates"              |
+| Module: win_updates                          |
+| Condition: cluster_update_enabled=true       |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Build alignment check                        |
+| File: roles/win_failover_cluster/tasks/build_alignment.yml
+| Task: "Collect OS build info"                |
+| Module: win_cluster_build_info               |
+| Condition: cluster_present=false             |
+| Task: "Ensure nodes same build"              |
+| Module: assert                               |
+| Condition: primary                           |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Test-Cluster (primary only)                  |
+| File: roles/win_failover_cluster/tasks/validate_cluster.yml
+| Task: "Validate cluster readiness"           |
+| Module: win_cluster_validate                 |
+| Condition: cluster_validation_enabled=true   |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Create cluster (primary only)                |
+| File: roles/win_failover_cluster/tasks/create_cluster.yml
+| Task: "Create cluster when missing"          |
+| Module: win_cluster_create                   |
+| Condition: cluster_present=false             |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++---------------------------------------------+
+| Quorum setup (primary only)                  |
+| File: roles/win_failover_cluster/tasks/quorum.yml
+| Task: "Ensure quorum"                        |
+| Module: win_cluster_quorum_ensure            |
+| Condition: cluster_present=false             |
+| FAIL -> stop                                 |
++---------------------------------------------+
+  |
+  v
++----------------------+
+| DONE                 |
++----------------------+

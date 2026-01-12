@@ -1,0 +1,8 @@
+# Cluster variables defined here; override role defaults in roles/win_failover_cluster/defaults/main.yml.
+cluster_name: "LAB-CL01"
+cluster_ip: "10.91.20.150"
+cluster_nodes:
+  - win-node-01
+  - win-node-02
+quorum_mode: "NodeAndFileShareMajority"
+quorum_witness_path: "\\dc01\\ClusterWitness$"

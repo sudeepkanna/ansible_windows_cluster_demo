@@ -1,0 +1,17 @@
+# Playbook: Create the Windows Failover Cluster.
+# Purpose: Execute the create logic (primary-only) — uses win_cluster_info and win_cluster_create modules.
+- name: Windows Failover Cluster — Create cluster
+  hosts: windows_cluster_nodes # Target all cluster nodes.
+  gather_facts: false # Skip facts; role handles its own checks.
+  tasks:
+    - name: Ensure cluster is created (runs on the primary node)
+      include_role:
+        name: win_failover_cluster # Role that owns cluster creation logic.
+        tasks_from: create_cluster.yml # Run only the create task set.
+      # The included tasks:
+      # - Check cluster state (win_cluster_info) => register: cluster_info (fallback when needed)
+      #   runs only on host where inventory_hostname == cluster_primary (defined in roles/win_failover_cluster/tasks/main.yml)
+      # - Create cluster when missing (win_cluster_create) => register: cluster_create
+      #   runs only on cluster_primary and when cluster_present is false
+      # Variables used by the role are defined in group_vars/windows_cluster_nodes.yml
+      # (defaults in roles/win_failover_cluster/defaults/main.yml).

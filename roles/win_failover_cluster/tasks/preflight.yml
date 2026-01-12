@@ -1,0 +1,45 @@
+# Preflight assertions: ensure required inputs exist and are well-formed.
+- name: Validate cluster inputs # Core variable checks (no changes).
+  assert: # Use Ansible's assert module to validate inputs.
+    that: # List of boolean expressions that must all be true.
+      - cluster_name is string # defined in group_vars/windows_cluster_nodes.yml (default in roles/win_failover_cluster/defaults/main.yml)
+      - cluster_name | length > 0 # Ensure cluster_name is not empty.
+      - cluster_ip is string # defined in group_vars/windows_cluster_nodes.yml (default in roles/win_failover_cluster/defaults/main.yml)
+      - cluster_ip | length > 0 # Ensure cluster_ip is not empty.
+      - cluster_nodes is iterable # defined in group_vars/windows_cluster_nodes.yml (default in roles/win_failover_cluster/defaults/main.yml)
+      - cluster_nodes | length >= 2 # Ensure at least two nodes are provided.
+    fail_msg: >- # Friendly error message when any assertion fails.
+      cluster_name, cluster_ip, and cluster_nodes must be set. cluster_nodes must # Explain required variables.
+      include at least two nodes. # Explain node count requirement.
+  # Notes: Fail fast if any required core variable is missing or invalid.
+
+- name: Validate quorum witness settings when required # Quorum-specific checks.
+  assert: # Use assert to validate quorum witness inputs.
+    that: # List of required conditions for the witness.
+      - quorum_witness_path is string # defined in group_vars/windows_cluster_nodes.yml (default in roles/win_failover_cluster/defaults/main.yml)
+      - quorum_witness_path | length > 0 # Ensure quorum_witness_path is not empty.
+    fail_msg: quorum_witness_path must be set for the selected quorum_mode. # Error when witness path is missing.
+  when: quorum_mode in ["NodeAndFileShareMajority", "FileShareWitness"] # quorum_mode defined in group_vars/windows_cluster_nodes.yml (default in roles/win_failover_cluster/defaults/main.yml)
+  # Notes: Runs only when the chosen quorum mode requires a file share witness.
+
+- name: Validate primary node is in the inventory group # Primary node membership check.
+  assert: # Use assert to validate primary node membership.
+    that: # List of membership checks.
+      - cluster_primary in groups["windows_cluster_nodes"] # cluster_primary is defined in roles/win_failover_cluster/tasks/main.yml
+    fail_msg: cluster_primary must be a member of the windows_cluster_nodes group. # Error when primary node is not in the group.
+  # Notes: Ensures the derived `cluster_primary` is present in the inventory group.
+
+- name: Validate all cluster nodes are in the inventory group # Node membership check.
+  assert:
+    that:
+      - missing_nodes | length == 0
+    fail_msg: >-
+      cluster_nodes contains hosts not in the windows_cluster_nodes group: {{ missing_nodes }}
+  vars:
+    missing_nodes: >-
+      {{
+        cluster_nodes
+        | reject('in', groups['windows_cluster_nodes'])
+        | list
+      }}
+  # Notes: Prevents delegate_to failures when cluster_nodes contains unknown hosts.

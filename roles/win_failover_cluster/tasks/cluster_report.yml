@@ -1,0 +1,35 @@
+# Report cluster details when the cluster already exists.
+- name: Check FailoverClusters module availability (primary-only)
+  win_cluster_module_check:
+    module_name: "{{ cluster_ps_module }}" # Defaults to FailoverClusters.
+    import: true # Import module for subsequent info queries.
+  register: cluster_ps_module_info
+  changed_when: false
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_ps_module is defined
+    - cluster_module_present | default(true)
+
+- name: Get current quorum configuration (primary-only)
+  win_cluster_quorum_info:
+    cluster_name: "{{ cluster_name }}" # Cluster name to query.
+  register: cluster_quorum_info
+  changed_when: false
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_module_present | default(true)
+
+- name: Report cluster quorum configuration (primary-only)
+  debug:
+    msg: >-
+      Cluster quorum type: {{ cluster_quorum_info.quorum_type }}; witness: {{ cluster_quorum_info.witness_path | default('none') }}
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_module_present | default(true)
+
+- name: Report missing FailoverClusters module (primary-only)
+  debug:
+    msg: "FailoverClusters module is missing on the primary node; quorum report skipped."
+  when:
+    - inventory_hostname == cluster_primary
+    - not cluster_module_present | default(true)

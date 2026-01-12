@@ -1,0 +1,2 @@
+# Optional per-host overrides (override inventory/hosts.ini when set here)
+ansible_host: 10.91.20.102 # defined here for this host

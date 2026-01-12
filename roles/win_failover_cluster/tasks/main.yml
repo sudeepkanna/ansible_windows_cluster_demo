@@ -1,0 +1,46 @@
+
+# Determine the primary node for orchestration and import role task sets.
+# cluster_primary is the first hostname in the `cluster_nodes` list.
+# cluster_nodes is defined in group_vars/windows_cluster_nodes.yml (defaults in roles/win_failover_cluster/defaults/main.yml).
+- name: Determine primary node
+  set_fact:
+    cluster_primary: "{{ cluster_nodes | first }}" # Primary host used for cluster-only operations.
+  changed_when: false
+
+# The role's behavior is split into task files that are imported in order:
+- import_tasks: preflight.yml      # Input validations across all nodes.
+- import_tasks: cluster_state.yml  # Determine cluster presence/membership.
+
+- import_tasks: cluster_report.yml # Report quorum info when cluster already exists.
+  when: cluster_present | default(false)
+
+- import_tasks: network.yml        # Check TCP connectivity between nodes.
+  when: not cluster_present | default(false)
+- import_tasks: features.yml       # Ensure Failover Clustering features are installed.
+  when: not cluster_present | default(false)
+- name: Fail when clustering prerequisites are not satisfied
+  fail:
+    msg: "Clustering prerequisites are not satisfied; skipping validation and cluster operations."
+  when:
+    - not cluster_present | default(false)
+    - not cluster_prereqs_ok | default(false)
+- import_tasks: updates.yml        # Patch nodes (optional).
+  when:
+    - not cluster_present | default(false)
+    - cluster_prereqs_ok | default(false)
+- import_tasks: build_alignment.yml # Verify OS build alignment.
+  when:
+    - not cluster_present | default(false)
+    - cluster_prereqs_ok | default(false)
+- import_tasks: validate_cluster.yml # Run Test-Cluster.
+  when:
+    - not cluster_present | default(false)
+    - cluster_prereqs_ok | default(false)
+- import_tasks: create_cluster.yml   # Cluster creation logic (primary-only checks inside).
+  when:
+    - not cluster_present | default(false)
+    - cluster_prereqs_ok | default(false)
+- import_tasks: quorum.yml           # Quorum/witness configuration (primary-only checks inside).
+  when:
+    - not cluster_present | default(false)
+    - cluster_prereqs_ok | default(false)

@@ -1,0 +1,13 @@
+# List of files and directories (relative to repo root) to include in the AWX package.
+# Update this file when you add new playbooks/roles/inventory or custom library modules
+# (for example, win_cluster_create.ps1 or win_cluster_port_check.ps1).
+
+- site.yml
+- playbooks/
+- roles/
+- inventory/hosts.ini
+- group_vars/windows_cluster_nodes.yml
+- host_vars/
+- library/
+- plugins/
+- README.md

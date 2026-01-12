@@ -1,0 +1,64 @@
+# Ensure required Windows features are present before any cluster operations.
+- name: Ensure Failover Clustering features are installed
+  win_feature:
+    name: "{{ item.name }}"
+    state: present # Ensure feature is installed.
+    include_management_tools: "{{ item.include_management_tools | default(false) }}" # Include mgmt tools when required.
+  loop: "{{ cluster_features }}"
+  register: cluster_features_result
+
+- name: Report when a reboot is required for clustering features
+  debug:
+    msg: "A reboot is required to finalize clustering feature installation."
+  when: cluster_features_result.results | selectattr('reboot_required', 'defined') | selectattr('reboot_required') | list | length > 0
+
+- name: Determine if clustering feature install requires a reboot
+  set_fact:
+    cluster_feature_reboot_required: >-
+      {{
+        cluster_features_result.results
+        | selectattr('reboot_required', 'defined')
+        | selectattr('reboot_required')
+        | list
+        | length > 0
+      }}
+  changed_when: false
+
+- name: Reboot when clustering features require it
+  win_reboot:
+    reboot_timeout: "{{ cluster_feature_reboot_timeout }}" # Seconds to wait for reboot to complete.
+  when:
+    - cluster_feature_reboot_required | bool
+    - cluster_feature_reboot # true: auto-reboot; false: stop before cluster steps
+  register: cluster_feature_reboot_result
+
+- name: Mark clustering feature reboot as completed
+  set_fact:
+    cluster_feature_reboot_completed: true
+  when: cluster_feature_reboot_result is defined
+  changed_when: false
+
+- name: Fail if clustering features require a reboot but auto-reboot is disabled
+  fail:
+    msg: "Clustering features require a reboot. Enable cluster_feature_reboot or reboot the node(s) and rerun."
+  when:
+    - cluster_feature_reboot_required | bool
+    - not cluster_feature_reboot
+
+- name: Ensure the FailoverClusters PowerShell module is available
+  win_cluster_module_check:
+    module_name: "{{ cluster_ps_module }}" # Defaults to FailoverClusters.
+    import: true # Import module into the session for downstream commands.
+  register: cluster_ps_module_info
+  changed_when: false
+  when:
+    - cluster_features_result is defined # Run after feature install step.
+    - not cluster_feature_reboot_required | default(false) or cluster_feature_reboot_completed | default(false)
+
+- name: Mark clustering prerequisites as satisfied
+  set_fact:
+    cluster_prereqs_ok: true
+  when:
+    - cluster_features_result is defined
+    - cluster_ps_module_info is defined
+  changed_when: false

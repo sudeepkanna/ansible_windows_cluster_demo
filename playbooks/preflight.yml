@@ -1,0 +1,18 @@
+# Playbook: Run preflight checks against all cluster nodes.
+# Purpose: Validate required variables and basic input before cluster actions.
+# Calls: roles/win_failover_cluster/tasks/preflight.yml (assertions only).
+- name: Windows Failover Cluster — Preflight # Descriptive play name shown in Ansible output.
+  hosts: windows_cluster_nodes # Target the inventory group for all cluster nodes.
+  gather_facts: false # Skip fact gathering to keep preflight fast and simple.
+  tasks: # Begin task list for this play.
+    - name: Run preflight validations # Task label for clarity in logs.
+      include_role: # Pull in tasks from the win_failover_cluster role.
+        name: win_failover_cluster # Role that owns the preflight assertions.
+        tasks_from: preflight.yml # Specific role task file to run.
+      # The included role tasks assert that:
+      # - cluster_name (string, non-empty) from group_vars/windows_cluster_nodes.yml
+      # - cluster_ip (string, non-empty) from group_vars/windows_cluster_nodes.yml
+      # - cluster_nodes (iterable, length >= 2) from group_vars/windows_cluster_nodes.yml
+      # If quorum_mode (group_vars/windows_cluster_nodes.yml) requires a file share witness,
+      # they also assert quorum_witness_path (group_vars/windows_cluster_nodes.yml) is set.
+      # Defaults for these values live in roles/win_failover_cluster/defaults/main.yml.

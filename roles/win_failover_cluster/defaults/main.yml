@@ -1,0 +1,34 @@
+# Role defaults; override in group_vars/windows_cluster_nodes.yml when needed.
+cluster_name: "LAB-CL01"
+cluster_ip: "10.91.20.150"
+cluster_nodes: "{{ groups['windows_cluster_nodes'] }}"
+quorum_mode: "NodeAndFileShareMajority"
+quorum_witness_path: "\\dc01\\ClusterWitness$"
+cluster_features:
+  - name: Failover-Clustering
+    include_management_tools: true
+  - name: RSAT-Clustering-PowerShell
+  - name: RSAT-Clustering-CmdInterface
+cluster_ps_module: FailoverClusters
+cluster_feature_reboot: true # true: reboot automatically if feature install requires it; false: fail and stop
+cluster_feature_reboot_timeout: 3600 # seconds to wait for reboot completion when enabled
+cluster_update_enabled: true # true: install updates; false: skip win_updates step
+cluster_update_categories:
+  - CriticalUpdates
+  - SecurityUpdates
+  - UpdateRollups
+cluster_update_reboot: true # true: reboot automatically when required by updates; false: leave reboot to operator
+cluster_update_reboot_timeout: 3600 # seconds to wait for reboot completion when enabled
+cluster_network_check_enabled: true # true: check TCP ports between nodes; false: skip network check
+cluster_network_ports:
+  - 135 # RPC endpoint mapper
+  - 445 # SMB
+  - 3343 # Cluster service (TCP)
+cluster_network_timeout_seconds: 3 # seconds to wait per TCP port check
+cluster_network_check_retries: 2 # retry attempts for TCP port checks
+cluster_network_check_delay_seconds: 1 # seconds to wait between retries
+cluster_allow_registry_fallback: true # true: use registry fallback for cluster membership when module is missing
+cluster_validation_enabled: true # true: run Test-Cluster; false: skip validation
+cluster_validation_include: [] # empty: run all tests (subject to cluster_validation_skip)
+cluster_validation_skip:
+  - Storage # skip storage validation by default

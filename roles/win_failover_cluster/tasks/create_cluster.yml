@@ -1,0 +1,42 @@
+
+# Check cluster state if it was not already cached (primary-only).
+- name: Check cluster state (fallback)
+  win_cluster_info:
+    name: "{{ cluster_name }}" # Cluster name from group_vars/windows_cluster_nodes.yml.
+  register: cluster_info
+  when:
+    - inventory_hostname == cluster_primary # Primary-only to avoid redundant queries.
+    - cluster_present is not defined
+  changed_when: false
+  # win_cluster_info returns: { exists: true/false }
+
+- name: Record cluster existence (fallback)
+  set_fact:
+    cluster_present: "{{ cluster_info.exists | default(false) }}"
+    cluster_module_present: "{{ cluster_info.module_present | default(true) }}"
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_present is not defined
+  changed_when: false
+
+# Ensure required module is available before creation when cluster is missing.
+- name: Fail when FailoverClusters module is missing (primary-only)
+  fail:
+    msg: "FailoverClusters module is not available. Run the feature install tasks before creating the cluster."
+  when:
+    - inventory_hostname == cluster_primary
+    - not cluster_present | bool
+    - cluster_module_present is defined
+    - not cluster_module_present | bool
+
+# Create the cluster only when the cached check says it does not exist.
+- name: Create cluster when missing
+  win_cluster_create:
+    name: "{{ cluster_name }}" # Cluster name from group_vars/windows_cluster_nodes.yml.
+    nodes: "{{ cluster_nodes }}" # Cluster node list from group_vars/windows_cluster_nodes.yml.
+    static_address: "{{ cluster_ip }}" # Cluster IP from group_vars/windows_cluster_nodes.yml.
+  register: cluster_create
+  when:
+    - inventory_hostname == cluster_primary # Primary-only creation.
+    - not cluster_present | bool
+  # Runs New-Cluster only when the prior check reports the cluster is absent.

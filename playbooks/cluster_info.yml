@@ -1,0 +1,17 @@
+# Playbook: Query cluster info (single run).
+# Purpose: Run a single query to get cluster existence/status and display it.
+- name: Windows Failover Cluster — Info
+  hosts: windows_cluster_nodes # Target all cluster nodes.
+  gather_facts: false # Skip fact gathering for quick info query.
+  tasks:
+    - name: Get cluster info (run once on any node)
+      win_cluster_info:
+        name: "{{ cluster_name }}" # Cluster name from group_vars/windows_cluster_nodes.yml.
+      register: cluster_info # Captures exists/metadata from the module.
+      run_once: true # Execute on a single node to avoid redundant queries.
+      # Notes: run_once ensures the module runs only once across inventory; the registered
+      # variable is then displayed to the operator.
+
+    - name: Show cluster info
+      debug:
+        var: cluster_info # Display module output.

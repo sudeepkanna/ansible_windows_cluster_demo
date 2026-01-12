@@ -1,0 +1,47 @@
+# Check TCP connectivity between nodes (all nodes).
+- name: Check TCP connectivity to peer nodes (all nodes)
+  win_cluster_port_check:
+    nodes: "{{ cluster_nodes }}" # Full cluster node list.
+    ports: "{{ cluster_network_ports }}" # TCP ports to test between nodes.
+    local_node: "{{ inventory_hostname }}" # Exclude the current node from targets.
+    timeout_seconds: "{{ cluster_network_timeout_seconds }}" # Per-port timeout.
+    retries: "{{ cluster_network_check_retries }}" # Retry attempts per port.
+    delay_seconds: "{{ cluster_network_check_delay_seconds }}" # Delay between retries.
+  register: cluster_port_check
+  changed_when: false
+  when: cluster_network_check_enabled
+
+- name: Record port check results (all nodes)
+  set_fact:
+    cluster_port_check_ok: "{{ cluster_port_check.ok | default(true) }}" # Node-level result.
+    cluster_port_check_failures: "{{ cluster_port_check.failures | default([]) }}" # Node-level failures.
+  when: cluster_network_check_enabled
+  changed_when: false
+
+- name: Ensure all nodes can reach peers on required TCP ports (primary-only)
+  assert:
+    that:
+      - port_check_failures | length == 0
+      - port_check_ok | bool
+    fail_msg: >-
+      TCP port checks failed between nodes: {{ port_check_failures }}
+  vars:
+    port_check_ok: >-
+      {{
+        cluster_nodes
+        | map('extract', hostvars)
+        | map(attribute='cluster_port_check_ok', default=true)
+        | list
+        | min
+      }}
+    port_check_failures: >-
+      {{
+        cluster_nodes
+        | map('extract', hostvars)
+        | map(attribute='cluster_port_check_failures', default=[])
+        | list
+        | flatten
+      }}
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_network_check_enabled

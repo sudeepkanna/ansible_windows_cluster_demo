@@ -1,0 +1,17 @@
+# Playbook: Ensure cluster quorum/witness is configured.
+# Purpose: Configure quorum mode and/or file share witness (primary-only).
+- name: Windows Failover Cluster — Ensure quorum
+  hosts: windows_cluster_nodes # Target all cluster nodes.
+  gather_facts: false # skip facts; role handles checks
+  tasks:
+    - name: Ensure quorum (runs on the primary node)
+      include_role:
+        name: win_failover_cluster # Role that owns quorum logic.
+        tasks_from: quorum.yml # Run only the quorum task set.
+      # The included task calls win_cluster_quorum_ensure with:
+      # - cluster_name (group_vars/windows_cluster_nodes.yml)
+      # - mode (quorum_mode in group_vars/windows_cluster_nodes.yml)
+      # - witness_path (quorum_witness_path in group_vars/windows_cluster_nodes.yml)
+      # It runs only on inventory_hostname == cluster_primary (defined in roles/win_failover_cluster/tasks/main.yml)
+      # and skips if the cluster does not exist.
+      # Defaults for these values live in roles/win_failover_cluster/defaults/main.yml.

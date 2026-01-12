@@ -1,0 +1,28 @@
+
+# Ensure cluster quorum/witness configuration (primary-only).
+- name: Check cluster state (fallback)
+  win_cluster_info:
+    name: "{{ cluster_name }}" # Cluster name from group_vars/windows_cluster_nodes.yml.
+  register: cluster_info
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_present is not defined
+  changed_when: false
+
+- name: Record cluster existence (fallback)
+  set_fact:
+    cluster_present: "{{ cluster_info.exists | default(false) }}"
+  when:
+    - inventory_hostname == cluster_primary
+    - cluster_present is not defined
+  changed_when: false
+
+- name: Ensure quorum
+  win_cluster_quorum_ensure:
+    cluster_name: "{{ cluster_name }}" # Cluster name from group_vars/windows_cluster_nodes.yml.
+    mode: "{{ quorum_mode }}" # Quorum mode from group_vars/windows_cluster_nodes.yml.
+    witness_path: "{{ quorum_witness_path }}" # Witness path from group_vars/windows_cluster_nodes.yml.
+  when:
+    - inventory_hostname == cluster_primary # Primary-only quorum operations.
+    - cluster_present | default(false) # Skip if cluster does not exist.
+  # The module inspects current quorum and only updates when a change is required.
