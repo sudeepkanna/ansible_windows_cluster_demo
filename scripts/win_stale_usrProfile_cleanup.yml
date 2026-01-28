@@ -1,0 +1,174 @@
+---
+module: win_stale_usrProfile_cleanup
+
+short_description: >
+  Safely detect and optionally remove stale Windows user profile registry entries
+  where ProfileImagePath is missing or empty.
+
+description:
+  - Scans the Windows ProfileList registry hive at
+    C(HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList).
+  - Detects broken or orphaned profile entries that can cause failures in
+    C(ansible.windows.win_user_profile).
+  - A profile entry is considered stale when C(ProfileImagePath) is missing or empty.
+  - Applies multiple guardrails to avoid touching valid, active, or system profiles.
+  - Supports audit-only mode (C(report)) and enforcement mode (C(absent)).
+  - Collects warnings and errors during execution and fails at the end (if configured),
+    instead of failing on the first error.
+
+options:
+  state:
+    description:
+      - Controls whether the module audits or removes stale profile entries.
+      - C(report) performs detection only.
+      - C(absent) removes detected stale entries.
+    type: str
+    choices:
+      - report
+      - absent
+    default: report
+
+  validateSidFormat:
+    description:
+      - Ensures each ProfileList subkey name parses as a valid Windows SID
+        before any further processing.
+    type: bool
+    default: true
+
+  requireUserSidPrefix:
+    description:
+      - Restricts processing to SIDs starting with C(S-1-5-21-), representing
+        local or domain users created in SAM or Active Directory.
+      - Prevents accidental modification of system, service, or virtual accounts.
+    type: bool
+    default: true
+
+  skipBakKeys:
+    description:
+      - Skips ProfileList keys ending with C(.bak).
+      - These keys may be created temporarily by Windows during profile recovery.
+    type: bool
+    default: true
+
+  protectWellKnownSids:
+    description:
+      - Protects well-known system SIDs such as:
+        C(S-1-5-18), C(S-1-5-19), and C(S-1-5-20).
+    type: bool
+    default: true
+
+  requireHiveNotLoaded:
+    description:
+      - Requires that the user registry hive C(HKEY_USERS\<SID>) is not loaded.
+      - Prevents modifying profiles that are currently in use or logged in.
+    type: bool
+    default: true
+
+  requireUnmappedSid:
+    description:
+      - Requires that SID-to-account translation indicates the account is deleted.
+      - On domain-joined systems, this may require contacting a Domain Controller.
+    type: bool
+    default: true
+
+  treatSidLookupFailureAsUnmapped:
+    description:
+      - Treats non-IdentityNotMapped SID translation failures as unmapped.
+      - WARNING: This reduces safety and may cause deletion when DC connectivity
+        is unavailable.
+    type: bool
+    default: false
+
+  failOnDomainLookupFailure:
+    description:
+      - Fails the module at the end if Domain Controller lookup failures are
+        detected during SID translation.
+      - No unsafe deletions are performed due to lookup failures unless
+        C(treatSidLookupFailureAsUnmapped=true).
+    type: bool
+    default: false
+
+  domainLookupFailureThreshold:
+    description:
+      - Minimum number of domain/DC lookup failures required to trigger a failure
+        when C(failOnDomainLookupFailure=true).
+    type: int
+    default: 1
+
+  requireRefCountZeroIfPresent:
+    description:
+      - If the C(RefCount) registry value exists, requires it to be C(0)
+        before qualifying the profile entry as stale.
+    type: bool
+    default: true
+
+notes:
+  - This module removes only ProfileList registry keys and does not delete
+    profile directories or call Windows profile APIs.
+  - On domain-joined systems, SID-to-account translation may fail if the
+    Domain Controller is unreachable.
+  - By default, such lookup failures are treated as unknown and skipped (safe).
+  - Recommended to run in C(state=report) mode first in large environments.
+
+seealso:
+  - module: ansible.windows.win_user_profile
+  - module: ansible.windows.win_user
+
+examples:
+  - name: Audit stale ProfileList entries
+    win_stale_usrProfile_cleanup:
+      state: report
+
+  - name: Remove stale ProfileList entries safely
+    win_stale_usrProfile_cleanup:
+      state: absent
+
+  - name: Fail pipeline if domain/DC lookup fails
+    win_stale_usrProfile_cleanup:
+      state: absent
+      failOnDomainLookupFailure: true
+      domainLookupFailureThreshold: 1
+
+  - name: Aggressive cleanup (not recommended)
+    win_stale_usrProfile_cleanup:
+      state: absent
+      treatSidLookupFailureAsUnmapped: true
+
+return:
+  scannedKeyCount:
+    description: Number of ProfileList registry subkeys scanned.
+    returned: always
+    type: int
+
+  staleEntries:
+    description: List of detected stale profile entries.
+    returned: always
+    type: list
+    elements: dict
+
+  removedSids:
+    description: List of SIDs removed when C(state=absent).
+    returned: when state=absent
+    type: list
+    elements: str
+
+  warnings:
+    description: Non-fatal warnings encountered during execution.
+    returned: always
+    type: list
+    elements: str
+
+  domainLookupFailures:
+    description: Domain/DC lookup failures detected during SID translation.
+    returned: always
+    type: list
+    elements: str
+
+  errors:
+    description: Errors encountered during removal operations.
+    returned: always
+    type: list
+    elements: str
+
+author:
+  - Platform / Infrastructure Engineering Team
