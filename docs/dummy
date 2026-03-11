@@ -1,0 +1,147 @@
+#!powershell
+# Copyright: (c) 2024, sudeepkanna.s
+# GNU General Public License v3.0+
+# This module runs on an RDS Connection Broker and returns
+# collection membership and user groups for a given session host.
+
+#AnsibleRequires -CSharpUtil Ansible.Basic
+
+#Requires -Modules Ansible.Basic
+
+$spec = @{
+    options = @{
+        session_host = @{
+            type     = 'str'
+            required = $true
+        }
+    }
+    supports_check_mode = $true
+}
+
+$module = [Ansible.Basic.AnsibleModule]::Create($args, $spec)
+
+function Normalize-HostName {
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    return $Name.Trim().ToLower()
+}
+
+function Get-ShortName {
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    return (($Name.Trim()) -split '\.')[0].ToLower()
+}
+
+function Add-UniqueString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.Generic.List[string]]$List,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Value
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Value)) {
+        $trimmed = $Value.Trim()
+        if (-not $List.Contains($trimmed)) {
+            [void]$List.Add($trimmed)
+        }
+    }
+}
+
+try {
+    $sessionHost = $module.Params.session_host
+
+    if ([string]::IsNullOrWhiteSpace($sessionHost)) {
+        $module.FailJson("Parameter 'session_host' is required and cannot be empty.")
+    }
+
+    $normalizedTargets = New-Object 'System.Collections.Generic.List[string]'
+    Add-UniqueString -List $normalizedTargets -Value (Normalize-HostName -Name $sessionHost)
+    Add-UniqueString -List $normalizedTargets -Value (Get-ShortName -Name $sessionHost)
+
+    $resolvedCollectionNames = New-Object 'System.Collections.Generic.List[string]'
+    $resolvedGroups = New-Object 'System.Collections.Generic.List[string]'
+    $collectionDetails = New-Object 'System.Collections.Generic.List[object]'
+
+    $collections = @(Get-RDSessionCollection -ErrorAction Stop)
+
+    foreach ($collection in $collections) {
+        $collectionName = [string]$collection.CollectionName
+
+        if ([string]::IsNullOrWhiteSpace($collectionName)) {
+            continue
+        }
+
+        $hosts = @(Get-RDSessionHost -CollectionName $collectionName -ErrorAction Stop)
+
+        $sessionHostsInCollection = New-Object 'System.Collections.Generic.List[string]'
+        $isMatch = $false
+
+        foreach ($host in $hosts) {
+            $hostName = [string]$host.SessionHost
+
+            if ([string]::IsNullOrWhiteSpace($hostName)) {
+                continue
+            }
+
+            Add-UniqueString -List $sessionHostsInCollection -Value $hostName
+
+            $fqdnNorm = Normalize-HostName -Name $hostName
+            $shortNorm = Get-ShortName -Name $hostName
+
+            if ($normalizedTargets.Contains($fqdnNorm) -or $normalizedTargets.Contains($shortNorm)) {
+                $isMatch = $true
+            }
+        }
+
+        if (-not $isMatch) {
+            continue
+        }
+
+        Add-UniqueString -List $resolvedCollectionNames -Value $collectionName
+
+        $cfg = Get-RDSessionCollectionConfiguration -CollectionName $collectionName -UserGroup -ErrorAction Stop
+
+        $userGroups = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($group in @($cfg.UserGroup)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$group)) {
+                $g = ([string]$group).Trim()
+                Add-UniqueString -List $userGroups -Value $g
+                Add-UniqueString -List $resolvedGroups -Value $g
+            }
+        }
+
+        [void]$collectionDetails.Add(@{
+            name          = $collectionName
+            session_hosts = @($sessionHostsInCollection)
+            user_groups   = @($userGroups)
+        })
+    }
+
+    $module.Result.changed = $false
+    $module.Result.session_host = $sessionHost
+    $module.Result.collection_count = [int]$resolvedCollectionNames.Count
+    $module.Result.collections = @($resolvedCollectionNames)
+    $module.Result.collection_details = @($collectionDetails)
+    $module.Result.resolved_rdp_groups = @($resolvedGroups)
+
+    $module.ExitJson()
+}
+catch {
+    $module.FailJson("Failed to query RDS connection broker access. $($_.Exception.Message)")
+}
