@@ -1,7 +1,7 @@
 #!powershell
 # Module: rds_connection_broker_query
 # Purpose:
-# Query an RDS connection broker to determine which collections a
+# Query one RDS connection broker to determine which collections a
 # session host belongs to and return the user groups assigned to them.
 
 #AnsibleRequires -CSharpUtil Ansible.Basic
@@ -10,135 +10,145 @@
 $spec = @{
     options = @{
         session_host = @{
-            type = "str"
+            type     = "str"
             required = $true
         }
         connection_broker_name = @{
-            type = "str"
+            type     = "str"
             required = $true
         }
-
     }
     supports_check_mode = $true
 }
 
 $module = [Ansible.Basic.AnsibleModule]::Create($args, $spec)
 
-function add_unique_string {
+function Add-UniqueString {
     param (
-        [System.Collections.Generic.List[string]]$target_list,
-        [string]$value
+        [System.Collections.Generic.List[string]]$TargetList,
+        [string]$Value
     )
 
-    if ([string]::IsNullOrWhiteSpace($value)) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
         return
     }
 
-    $clean_value = $value.Trim()
+    $cleanValue = $Value.Trim()
 
-    if (-not $target_list.Contains($clean_value)) {
-        [void]$target_list.Add($clean_value)
+    if (-not $TargetList.Contains($cleanValue)) {
+        [void]$TargetList.Add($cleanValue)
     }
 }
 
-function match_host_name {
+function Match-HostName {
     param (
-        [string]$a,
-        [string]$b
+        [string]$A,
+        [string]$B
     )
 
-    if ([string]::IsNullOrWhiteSpace($a) -or [string]::IsNullOrWhiteSpace($b)) {
+    if ([string]::IsNullOrWhiteSpace($A) -or [string]::IsNullOrWhiteSpace($B)) {
         return $false
     }
 
-    $a_norm = $a.Trim().ToLower()
-    $b_norm = $b.Trim().ToLower()
+    $aNorm = $A.Trim().ToLower()
+    $bNorm = $B.Trim().ToLower()
 
-    if ($a_norm -eq $b_norm) {
+    if ($aNorm -eq $bNorm) {
         return $true
     }
 
-    $a_short = ($a_norm -split '\.')[0]
-    $b_short = ($b_norm -split '\.')[0]
+    $aShort = ($aNorm -split '\.')[0]
+    $bShort = ($bNorm -split '\.')[0]
 
-    return ($a_short -eq $b_short)
+    return ($aShort -eq $bShort)
 }
 
 try {
+    Import-Module RemoteDesktop -ErrorAction Stop
+}
+catch {
+    $module.FailJson("Failed to import RemoteDesktop module. $($_.Exception.Message)")
+}
 
-    $session_host_name = $module.Params.session_host
-$connection_broker_name = module.Params.connection_broker_name
+try {
+    $sessionHostName = $module.Params.session_host
+    $connectionBrokerName = $module.Params.connection_broker_name
 
-    if ([string]::IsNullOrWhiteSpace($session_host_name)) {
+    if ([string]::IsNullOrWhiteSpace($sessionHostName)) {
         $module.FailJson("Parameter 'session_host' cannot be empty.")
     }
 
-    $collections_found = New-Object 'System.Collections.Generic.List[string]'
-    $resolved_groups = New-Object 'System.Collections.Generic.List[string]'
-    $collection_details = New-Object 'System.Collections.Generic.List[object]'
+    if ([string]::IsNullOrWhiteSpace($connectionBrokerName)) {
+        $module.FailJson("Parameter 'connection_broker_name' cannot be empty.")
+    }
 
-    $collections = Get-RDSessionCollection -connectionbroker $connection_broker_name -ErrorAction Stop
+    $collectionsFound = New-Object 'System.Collections.Generic.List[string]'
+    $resolvedGroups = New-Object 'System.Collections.Generic.List[string]'
+    $collectionDetails = New-Object 'System.Collections.Generic.List[object]'
+
+    $collections = @(Get-RDSessionCollection -ConnectionBroker $connectionBrokerName -ErrorAction Stop)
 
     foreach ($collection in $collections) {
+        $collectionName = [string]$collection.CollectionName
 
-        $collection_name = $collection.CollectionName
-
-        if ([string]::IsNullOrWhiteSpace($collection_name)) {
+        if ([string]::IsNullOrWhiteSpace($collectionName)) {
             continue
         }
 
-        $hosts = Get-RDSessionHost -CollectionName $collection_name -ErrorAction Stop
+        $hosts = @(Get-RDSessionHost `
+            -CollectionName $collectionName `
+            -ConnectionBroker $connectionBrokerName `
+            -ErrorAction Stop)
 
-        $session_hosts_in_collection = New-Object 'System.Collections.Generic.List[string]'
-        $host_match = $false
+        $sessionHostsInCollection = New-Object 'System.Collections.Generic.List[string]'
+        $hostMatch = $false
 
-        foreach ($s_host in $hosts) {
+        foreach ($sHost in $hosts) {
+            $hostName = [string]$sHost.SessionHost
 
-            $host_name = $s_host.SessionHost
+            Add-UniqueString -TargetList $sessionHostsInCollection -Value $hostName
 
-            add_unique_string -target_list $session_hosts_in_collection -value $host_name
-
-            if (match_host_name -a $host_name -b $session_host_name) {
-                $host_match = $true
+            if (Match-HostName -A $hostName -B $sessionHostName) {
+                $hostMatch = $true
             }
         }
 
-        if (-not $host_match) {
+        if (-not $hostMatch) {
             continue
         }
 
-        add_unique_string -target_list $collections_found -value $collection_name
+        Add-UniqueString -TargetList $collectionsFound -Value $collectionName
 
         $config = Get-RDSessionCollectionConfiguration `
-            -CollectionName $collection_name `
+            -CollectionName $collectionName `
+            -ConnectionBroker $connectionBrokerName `
             -UserGroup `
             -ErrorAction Stop
 
-        $collection_groups = New-Object 'System.Collections.Generic.List[string]'
+        $collectionGroups = New-Object 'System.Collections.Generic.List[string]'
 
-        foreach ($group in $config.UserGroup) {
-
-            add_unique_string -target_list $collection_groups -value $group
-            add_unique_string -target_list $resolved_groups -value $group
+        foreach ($group in @($config.UserGroup)) {
+            Add-UniqueString -TargetList $collectionGroups -Value ([string]$group)
+            Add-UniqueString -TargetList $resolvedGroups -Value ([string]$group)
         }
 
-        $collection_details.Add(@{
-            name = $collection_name
-            session_hosts = $session_hosts_in_collection
-            user_groups = $collection_groups
-        }) | Out-Null
+        [void]$collectionDetails.Add(@{
+            name          = $collectionName
+            session_hosts = @($sessionHostsInCollection)
+            user_groups   = @($collectionGroups)
+        })
     }
 
     $module.Result.changed = $false
-    $module.Result.session_host = $session_host_name
-    $module.Result.collection_count = $collections_found.Count
-    $module.Result.collections = $collections_found
-    $module.Result.collection_details = $collection_details
-    $module.Result.resolved_rdp_groups = $resolved_groups
+    $module.Result.connection_broker_name = $connectionBrokerName
+    $module.Result.session_host = $sessionHostName
+    $module.Result.collection_count = $collectionsFound.Count
+    $module.Result.collections = @($collectionsFound)
+    $module.Result.collection_details = @($collectionDetails)
+    $module.Result.resolved_rdp_groups = @($resolvedGroups)
 
     $module.ExitJson()
-
 }
 catch {
-    $module.FailJson("Failed to query RDS collections. $($_.Exception.Message)")
+    $module.FailJson("Failed to query RDS collections on broker '$connectionBrokerName'. $($_.Exception.Message)")
 }
