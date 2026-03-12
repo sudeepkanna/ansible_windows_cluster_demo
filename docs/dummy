@@ -1,8 +1,9 @@
 #!powershell
-# Module: rds_connection_broker_query
+# Copyright: (c) 2024, sudeepkanna.s
+# GNU General Public License v3.0+
 # Purpose:
-# Query one RDS connection broker to determine which collections a
-# session host belongs to and return the user groups assigned to them.
+# Run on one RDS Connection Broker and determine which collections a session host
+# belongs to, then return all assigned user groups for those collections.
 
 #AnsibleRequires -CSharpUtil Ansible.Basic
 #Requires -Modules Ansible.Basic
@@ -10,11 +11,11 @@
 $spec = @{
     options = @{
         session_host = @{
-            type     = "str"
+            type     = 'str'
             required = $true
         }
         connection_broker_name = @{
-            type     = "str"
+            type     = 'str'
             required = $true
         }
     }
@@ -67,7 +68,7 @@ try {
     Import-Module RemoteDesktop -ErrorAction Stop
 }
 catch {
-    $module.FailJson("Failed to import RemoteDesktop module. $($_.Exception.Message)")
+    $module.FailJson("Failed to import RemoteDesktop module. Ensure it is installed and available. $($_.Exception.Message)")
 }
 
 try {
@@ -95,17 +96,13 @@ try {
             continue
         }
 
-        $hosts = @(Get-RDSessionHost `
-            -CollectionName $collectionName `
-            -ConnectionBroker $connectionBrokerName `
-            -ErrorAction Stop)
+        $hosts = @(Get-RDSessionHost -CollectionName $collectionName -ConnectionBroker $connectionBrokerName -ErrorAction Stop)
 
         $sessionHostsInCollection = New-Object 'System.Collections.Generic.List[string]'
         $hostMatch = $false
 
         foreach ($sHost in $hosts) {
             $hostName = [string]$sHost.SessionHost
-
             Add-UniqueString -TargetList $sessionHostsInCollection -Value $hostName
 
             if (Match-HostName -A $hostName -B $sessionHostName) {
@@ -134,21 +131,23 @@ try {
 
         [void]$collectionDetails.Add(@{
             name          = $collectionName
-            session_hosts = @($sessionHostsInCollection)
-            user_groups   = @($collectionGroups)
+            session_hosts = $sessionHostsInCollection.ToArray()
+            user_groups   = $collectionGroups.ToArray()
         })
     }
 
     $module.Result.changed = $false
-    $module.Result.connection_broker_name = $connectionBrokerName
     $module.Result.session_host = $sessionHostName
-    $module.Result.collection_count = $collectionsFound.Count
-    $module.Result.collections = @($collectionsFound)
-    $module.Result.collection_details = @($collectionDetails)
-    $module.Result.resolved_rdp_groups = @($resolvedGroups)
+    $module.Result.connection_broker_name = $connectionBrokerName
+    $module.Result.collection_count = [int]$collectionsFound.Count
+    $module.Result.collections = $collectionsFound.ToArray()
+    $module.Result.collection_details = $collectionDetails.ToArray()
+    $module.Result.resolved_rdp_groups = $resolvedGroups.ToArray()
+    $module.Result.current_user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $module.Result.current_host = $env:COMPUTERNAME
 
     $module.ExitJson()
 }
 catch {
-    $module.FailJson("Failed to query RDS collections on broker '$connectionBrokerName'. $($_.Exception.Message)")
+    $module.FailJson("Failed to query RDS collections. $($_.Exception.Message)")
 }
