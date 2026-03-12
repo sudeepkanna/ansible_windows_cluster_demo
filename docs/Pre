@@ -1,4 +1,3 @@
----
 - name: Discover RDS session host connection brokers
   pcs.windows.rds_session_host_discovery:
   register: rds_connection_broker_hosts
@@ -13,53 +12,27 @@
     rds_connection_broker_hosts.connection_brokers is not defined or
     (rds_connection_broker_hosts.connection_brokers | length == 0)
 
-- name: Initialize RDS broker query result
-  ansible.builtin.set_fact:
-    _rds_connection_broker_query_success: false
-    _rds_connection_broker_query_result: {}
-    _rds_successful_connection_broker: ""
-    _rds_remote_desktop_groups: []
-
-- name: Try discovered connection brokers until one succeeds
-  vars:
-    ansible_become: true
-    ansible_become_method: runas
-    ansible_become_user: "{{ ansible_user }}"
-    ansible_become_password: "{{ ansible_password }}"
+- name: Query RDS connection brokers for collection-based access
   pcs.windows.rds_connection_broker_access:
     session_host: "{{ inventory_hostname }}"
-    connection_broker_name: "{{ item }}"
-  register: _rds_broker_attempt
-  ignore_errors: true
-  loop: "{{ rds_connection_broker_hosts.connection_brokers }}"
-  when: not _rds_connection_broker_query_success
+    connection_broker_names: "{{ rds_connection_broker_hosts.connection_brokers }}"
+  register: _rds_connection_broker_query_result
 
-- name: Store first successful connection broker result
-  ansible.builtin.set_fact:
-    _rds_connection_broker_query_success: true
-    _rds_connection_broker_query_result: "{{ item }}"
-    _rds_successful_connection_broker: "{{ item.connection_broker_name }}"
-    _rds_remote_desktop_groups: "{{ item.resolved_rdp_groups | default([]) | unique | list }}"
-  loop: "{{ _rds_broker_attempt.results | default([]) }}"
-  when:
-    - not _rds_connection_broker_query_success
-    - not (item.failed | default(false))
-    - item.resolved_rdp_groups is defined
-
-- name: Fail when all discovered connection brokers failed
+- name: Fail when no RDS groups were returned
   ansible.builtin.fail:
     msg: >-
-      All discovered connection brokers failed for {{ inventory_hostname }}.
-      Brokers tried: {{ rds_connection_broker_hosts.connection_brokers | to_json }}
-      Results: {{ _rds_broker_attempt.results | default([]) | to_nice_json }}
-  when: not _rds_connection_broker_query_success
-
-- name: Fail when broker query succeeded but no RDS groups were returned
-  ansible.builtin.fail:
-    msg: >-
-      Connection broker {{ _rds_successful_connection_broker }} responded for
-      {{ inventory_hostname }}, but no resolved_rdp_groups were returned.
+      No RDS collection user groups were returned for {{ inventory_hostname }}.
       Result: {{ _rds_connection_broker_query_result | to_nice_json }}
-  when:
-    - _rds_connection_broker_query_success
-    - (_rds_remote_desktop_groups | length == 0)
+  when: >
+    _rds_connection_broker_query_result.resolved_rdp_groups is not defined or
+    (_rds_connection_broker_query_result.resolved_rdp_groups | length == 0)
+
+- name: Build dynamic remote desktop group list
+  ansible.builtin.set_fact:
+    _rds_remote_desktop_groups: >-
+      {{
+        _rds_connection_broker_query_result.resolved_rdp_groups
+        | default([])
+        | unique
+        | list
+      }}
