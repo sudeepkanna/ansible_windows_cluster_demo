@@ -1,0 +1,3 @@
+vars_system_role_all:
+  access:
+    remote_desktop: "{{ _rds_remote_desktop_groups | default([]) }}"
