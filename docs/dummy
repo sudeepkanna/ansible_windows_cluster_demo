@@ -1,10 +1,9 @@
 #!powershell
-# Copyright: (c) 2024, sudeepkanna.s
-# GNU General Public License v3.0+
+# Copyright: (c) 2024
 # Purpose:
-# Query one or more RDS Connection Brokers to determine which collections a session host
-# belongs to, then return all assigned user groups for those collections.
-# The module tries brokers in order and stops on the first successful active broker.
+# Query multiple RDS connection brokers to determine which collections
+# a session host belongs to and return the merged user groups assigned
+# to those collections. Brokers are tried in order until one succeeds.
 
 #AnsibleRequires -CSharpUtil Ansible.Basic
 #Requires -Modules Ansible.Basic
@@ -12,22 +11,24 @@
 $spec = @{
     options = @{
         session_host = @{
-            type     = 'str'
+            type = "str"
             required = $true
         }
+
         connection_broker_names = @{
-            type     = 'list'
-            elements = 'str'
+            type = "list"
+            elements = "str"
             required = $true
         }
     }
+
     supports_check_mode = $true
 }
 
 $module = [Ansible.Basic.AnsibleModule]::Create($args, $spec)
 
 function Add-UniqueString {
-    param (
+    param(
         [System.Collections.Generic.List[string]]$TargetList,
         [string]$Value
     )
@@ -36,15 +37,15 @@ function Add-UniqueString {
         return
     }
 
-    $cleanValue = $Value.Trim()
+    $clean = $Value.Trim()
 
-    if (-not $TargetList.Contains($cleanValue)) {
-        [void]$TargetList.Add($cleanValue)
+    if (-not $TargetList.Contains($clean)) {
+        [void]$TargetList.Add($clean)
     }
 }
 
 function Match-HostName {
-    param (
+    param(
         [string]$A,
         [string]$B
     )
@@ -66,35 +67,41 @@ function Match-HostName {
     return ($aShort -eq $bShort)
 }
 
-function Resolve-BrokerCollections {
-    param (
-        [string]$SessionHostName,
-        [string]$ConnectionBrokerName
+function Query-Broker {
+    param(
+        [string]$SessionHost,
+        [string]$Broker
     )
 
     $collectionsFound = New-Object 'System.Collections.Generic.List[string]'
     $resolvedGroups = New-Object 'System.Collections.Generic.List[string]'
     $collectionDetails = New-Object 'System.Collections.Generic.List[object]'
 
-    $collections = @(Get-RDSessionCollection -ConnectionBroker $ConnectionBrokerName -ErrorAction Stop)
+    $collections = Get-RDSessionCollection -ConnectionBroker $Broker -ErrorAction Stop
 
     foreach ($collection in $collections) {
-        $collectionName = [string]$collection.CollectionName
+
+        $collectionName = $collection.CollectionName
 
         if ([string]::IsNullOrWhiteSpace($collectionName)) {
             continue
         }
 
-        $hosts = @(Get-RDSessionHost -CollectionName $collectionName -ConnectionBroker $ConnectionBrokerName -ErrorAction Stop)
+        $hosts = Get-RDSessionHost `
+            -CollectionName $collectionName `
+            -ConnectionBroker $Broker `
+            -ErrorAction Stop
 
-        $sessionHostsInCollection = New-Object 'System.Collections.Generic.List[string]'
+        $sessionHosts = New-Object 'System.Collections.Generic.List[string]'
         $hostMatch = $false
 
-        foreach ($sHost in $hosts) {
-            $hostName = [string]$sHost.SessionHost
-            Add-UniqueString -TargetList $sessionHostsInCollection -Value $hostName
+        foreach ($host in $hosts) {
 
-            if (Match-HostName -A $hostName -B $SessionHostName) {
+            $hostName = $host.SessionHost
+
+            Add-UniqueString -TargetList $sessionHosts -Value $hostName
+
+            if (Match-HostName -A $hostName -B $SessionHost) {
                 $hostMatch = $true
             }
         }
@@ -107,107 +114,108 @@ function Resolve-BrokerCollections {
 
         $config = Get-RDSessionCollectionConfiguration `
             -CollectionName $collectionName `
-            -ConnectionBroker $ConnectionBrokerName `
+            -ConnectionBroker $Broker `
             -UserGroup `
             -ErrorAction Stop
 
         $collectionGroups = New-Object 'System.Collections.Generic.List[string]'
 
-        foreach ($group in @($config.UserGroup)) {
-            Add-UniqueString -TargetList $collectionGroups -Value ([string]$group)
-            Add-UniqueString -TargetList $resolvedGroups -Value ([string]$group)
+        foreach ($group in $config.UserGroup) {
+
+            Add-UniqueString -TargetList $collectionGroups -Value $group
+            Add-UniqueString -TargetList $resolvedGroups -Value $group
         }
 
-        [void]$collectionDetails.Add(@{
-            name          = $collectionName
-            session_hosts = $sessionHostsInCollection.ToArray()
-            user_groups   = $collectionGroups.ToArray()
-        })
+        $collectionDetails.Add(@{
+            name = $collectionName
+            session_hosts = $sessionHosts
+            user_groups = $collectionGroups
+        }) | Out-Null
     }
 
     return @{
-        collection_count   = [int]$collectionsFound.Count
-        collections        = $collectionsFound.ToArray()
-        collection_details = $collectionDetails.ToArray()
-        resolved_rdp_groups = $resolvedGroups.ToArray()
+        collection_count = $collectionsFound.Count
+        collections = $collectionsFound
+        collection_details = $collectionDetails
+        resolved_rdp_groups = $resolvedGroups
     }
 }
 
 try {
+
     Import-Module RemoteDesktop -ErrorAction Stop
+
 }
 catch {
-    $module.FailJson("Failed to import RemoteDesktop module. Ensure it is installed and available. $($_.Exception.Message)")
+    $module.FailJson("Failed to load RemoteDesktop module: $($_.Exception.Message)")
 }
 
 try {
-    $sessionHostName = $module.Params.session_host
-    $connectionBrokerNames = @($module.Params.connection_broker_names)
 
-    if ([string]::IsNullOrWhiteSpace($sessionHostName)) {
-        $module.FailJson("Parameter 'session_host' cannot be empty.")
-    }
+    $sessionHost = $module.Params.session_host
+    $brokers = $module.Params.connection_broker_names
 
-    if (-not $connectionBrokerNames -or $connectionBrokerNames.Count -eq 0) {
-        $module.FailJson("Parameter 'connection_broker_names' must contain at least one broker.")
-    }
-
-    $normalizedBrokerNames = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($broker in $connectionBrokerNames) {
-        Add-UniqueString -TargetList $normalizedBrokerNames -Value ([string]$broker)
-    }
-
-    if ($normalizedBrokerNames.Count -eq 0) {
-        $module.FailJson("No valid broker names were provided in 'connection_broker_names'.")
+    if (-not $brokers -or $brokers.Count -eq 0) {
+        $module.FailJson("connection_broker_names list is empty.")
     }
 
     $attempts = New-Object 'System.Collections.Generic.List[object]'
+    $result = $null
     $successfulBroker = $null
-    $finalResult = $null
     $lastError = $null
 
-    foreach ($broker in $normalizedBrokerNames) {
+    foreach ($broker in $brokers) {
+
         try {
-            $result = Resolve-BrokerCollections -SessionHostName $sessionHostName -ConnectionBrokerName $broker
 
+            $query = Query-Broker -SessionHost $sessionHost -Broker $broker
+
+            $result = $query
             $successfulBroker = $broker
-            $finalResult = $result
 
-            [void]$attempts.Add(@{
+            $attempts.Add(@{
                 broker = $broker
-                status = 'success'
-            })
+                status = "success"
+            }) | Out-Null
 
             break
         }
         catch {
+
             $lastError = $_.Exception.Message
-            [void]$attempts.Add(@{
+
+            $attempts.Add(@{
                 broker = $broker
-                status = 'failed'
-                error  = $lastError
-            })
+                status = "failed"
+                error = $lastError
+            }) | Out-Null
         }
     }
 
-    if ($null -eq $finalResult) {
-        $module.FailJson("Failed to query all connection brokers. Last error: $lastError")
+    if ($null -eq $result) {
+
+        $module.FailJson(
+            "All connection brokers failed. Last error: $lastError",
+            @{
+                attempts = $attempts
+            }
+        )
     }
 
     $module.Result.changed = $false
-    $module.Result.session_host = $sessionHostName
-    $module.Result.connection_brokers_tried = $normalizedBrokerNames.ToArray()
+    $module.Result.session_host = $sessionHost
     $module.Result.successful_connection_broker = $successfulBroker
-    $module.Result.attempts = $attempts.ToArray()
-    $module.Result.collection_count = $finalResult.collection_count
-    $module.Result.collections = $finalResult.collections
-    $module.Result.collection_details = $finalResult.collection_details
-    $module.Result.resolved_rdp_groups = $finalResult.resolved_rdp_groups
-    $module.Result.current_user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $module.Result.current_host = $env:COMPUTERNAME
+    $module.Result.connection_brokers_tried = $brokers
+    $module.Result.attempts = $attempts
+    $module.Result.collection_count = $result.collection_count
+    $module.Result.collections = $result.collections
+    $module.Result.collection_details = $result.collection_details
+    $module.Result.resolved_rdp_groups = $result.resolved_rdp_groups
 
     $module.ExitJson()
+
 }
 catch {
-    $module.FailJson("Failed to query RDS collections. $($_.Exception.Message)")
+
+    $module.FailJson("Module execution failed: $($_.Exception.Message)")
 }
