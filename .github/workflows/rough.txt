@@ -1,0 +1,102 @@
+---
+config:
+  layout: elk
+---
+flowchart LR
+ subgraph R["Desired State Control Loop"]
+    direction TB
+        J["Reconciliation Trigger<br>Scheduled / Manual / Event"]
+        K["Load Approved Desired State"]
+        L["Read Actual Server State"]
+        M{"Drift Detected?"}
+        N["Compliant State"]
+        O["Remediate Delta"]
+        P["Publish Compliance Event<br>Drift / Correction / Evidence"]
+  end
+ subgraph BG["Emergency Access Path"]
+    direction TB
+        BG1["Critical Incident / Platform Failure"]
+        BG2["Break-Glass Approval<br>Dual Control / Emergency Approval"]
+        BG3["Vault / Secure Credential Store"]
+        BG4["Temporary Emergency Access"]
+        BG5["Full Audit Logging / Session Evidence"]
+        BG6["Access Expiry / Cleanup"]
+        BG7["Reconciliation Removes Unapproved Residual Changes"]
+  end
+ subgraph PIPE["Pipeline / Automation Identity Path"]
+    direction TB
+        P1["Pipeline or Deployment Workflow"]
+        P2["Call AGF API"]
+        P3["Create NPA via Governed API Path"]
+        P4["Register Metadata in CMDB"]
+  end
+    A["ServiceNow Catalog Request<br>NPA details, target scope, rights, justification"] --> B{"Approval<br>ServiceNow or IAM"}
+    B -- Approved --> C["Approved Request"]
+    B -- Rejected --> A
+    C --> D["AGF Identity Governance<br>Creates NPA in Active Directory"]
+    D --> E["CMDB Updated<br>Store approved metadata and targeting facts<br>OAR, environment, servers,<br>system role, permission pattern"]
+    E --> F["Automation Controller<br>Query CMDB"]
+    T["Targeting Options<br>By OAR / Environment / Role / Server Name"] -. reference .-> F
+    F --> G["Resolve Desired Configuration<br>Local groups, user rights, bindings"]
+    G --> H["Apply Configuration on Target Servers"]
+    H --> I["Execution Result<br>Success / Partial / Failure"]
+    J --> K
+    K --> L
+    L --> M
+    M -- No --> N
+    M -- Yes --> O
+    O --> P
+    E -. desired state source .-> J
+    H -. current enforced state .-> J
+    P --> Q["Azure Monitor / Arc"] & R1["SIEM / Security Monitoring"] & S["ServiceNow Incident / Task<br>Optional"] & U["Windows Event Log / JSON Log<br>Optional"]
+    BG1 --> BG2
+    BG2 --> BG3
+    BG3 --> BG4
+    BG4 --> BG5 & BG6
+    BG6 --> BG7
+    BG7 --> P
+    P1 --> P2
+    P2 --> P3
+    P3 --> P4
+    P4 --> F
+
+     J:::reconcile
+     K:::reconcile
+     L:::reconcile
+     M:::reconcile
+     N:::reconcile
+     O:::reconcile
+     P:::reconcile
+     BG1:::emergency
+     BG2:::emergency
+     BG3:::emergency
+     BG4:::emergency
+     BG5:::emergency
+     BG6:::emergency
+     BG7:::emergency
+     P1:::pipeline
+     P2:::pipeline
+     P3:::pipeline
+     P4:::pipeline
+     A:::request
+     B:::request
+     C:::request
+     D:::governance
+     E:::governance
+     F:::config
+     T:::governance
+     G:::config
+     H:::config
+     I:::config
+     Q:::monitor
+     R1:::monitor
+     S:::monitor
+     U:::monitor
+    classDef request fill:#f9e79f,stroke:#7d6608,color:#000
+    classDef governance fill:#aed6f1,stroke:#1b4f72,color:#000
+    classDef config fill:#d5f5e3,stroke:#145a32,color:#000
+    classDef reconcile fill:#f5cba7,stroke:#6e2c00,color:#000
+    classDef monitor fill:#d2b4de,stroke:#4a235a,color:#000
+    classDef emergency fill:#f5b7b1,stroke:#922b21,color:#000
+    classDef pipeline fill:#d6eaf8,stroke:#1f618d,color:#000
+  
