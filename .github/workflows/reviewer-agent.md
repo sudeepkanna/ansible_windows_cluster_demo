@@ -10,7 +10,7 @@ permissions:
   actions: read
   checks: read
 
-engine: codex
+engine: copilot
 
 safe-outputs:
   submit-pull-request-review:
