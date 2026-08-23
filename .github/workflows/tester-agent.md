@@ -9,7 +9,7 @@ permissions:
   actions: read
   checks: read
 
-engine: codex
+engine: copilot
 
 safe-outputs:
   add-comment:

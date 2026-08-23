@@ -9,7 +9,7 @@ permissions:
   pull-requests: read
   actions: read
 
-engine: codex
+engine: copilot
 
 safe-outputs:
   create-pull-request:
