@@ -9,9 +9,8 @@ permissions:
   pull-requests: read
   actions: read
 
-engine:
-  id: copilot
-  model: claude-haiku-4.5
+engine: copilot
+model: mini
 models:
   default-ai-credits-pricing:
     input: 0.000001
