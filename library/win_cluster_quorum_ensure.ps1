@@ -1,70 +1,70 @@
+Import-Module Ansible.Basic
 
-# win_cluster_quorum_ensure.ps1
-# Purpose: Ensure the cluster quorum configuration matches the desired `mode` and `witness_path`.
-# Parameters:
-# - cluster_name (str, required)
-# - mode (str, required)
-# - witness_path (str, required when using a file share witness)
-# Outputs:
-# - changed: true if the module updated the quorum configuration
-
-Import-Module Ansible.Basic # Load Ansible module helper.
-$spec = @{ options = @{ 
-  cluster_name=@{type="str";required=$true}
-  mode=@{type="str";required=$true}
-  witness_path=@{type="str";required=$false}
-}}
-$module = [Ansible.Basic.AnsibleModule]::Create($args,$spec) # Parse arguments.
-try {
-  $moduleName = "FailoverClusters"
-  # Ensure the FailoverClusters module is available before quorum operations.
-  if (-not (Get-Module -ListAvailable -Name $moduleName)) {
-    $module.FailJson("PowerShell module '$moduleName' not found. Ensure Failover Clustering features are installed.")
+$spec = @{
+  options = @{
+    cluster_name = @{ type = 'str'; required = $true }
+    mode = @{ type = 'str'; required = $true }
+    witness_path = @{ type = 'str'; required = $false }
   }
-  Import-Module $moduleName -ErrorAction Stop # Required for Get-ClusterQuorum/Set-ClusterQuorum.
+  supports_check_mode = $true
+}
+
+$module = [Ansible.Basic.AnsibleModule]::Create($args, $spec)
+
+try {
+  if (-not (Get-Module -ListAvailable -Name FailoverClusters)) {
+    $module.FailJson('FailoverClusters PowerShell module is not available.')
+  }
+
+  Import-Module FailoverClusters -ErrorAction Stop
 
   $mode = $module.Params.mode
   $witnessPath = $module.Params.witness_path
-  $allowedModes = @("NodeMajority", "NodeAndFileShareMajority", "FileShareWitness")
-  if (-not ($allowedModes -contains $mode)) {
-    $module.FailJson("Unsupported quorum mode '$mode'. Supported modes: " + ($allowedModes -join ", "))
+  $fileWitnessModes = @('NodeAndFileShareMajority', 'FileShareWitness')
+
+  if (($mode -ne 'NodeMajority') -and ($fileWitnessModes -notcontains $mode)) {
+    $module.FailJson("Unsupported quorum mode '$mode'.")
   }
 
-  $q = Get-ClusterQuorum -Cluster $module.Params.cluster_name -ErrorAction Stop # Current quorum settings.
-  $desiredType = if ($mode -eq "NodeMajority") { "NodeMajority" } else { "NodeAndFileShareMajority" }
+  $useFileWitness = $fileWitnessModes -contains $mode
+  if ($useFileWitness -and [string]::IsNullOrWhiteSpace($witnessPath)) {
+    $module.FailJson('witness_path is required for file share witness mode.')
+  }
 
-  $currentShare = $null
-  if ($q.QuorumResource) {
-    try {
-      $currentShare = (Get-ClusterParameter -InputObject $q.QuorumResource -Name SharePath -ErrorAction Stop).Value # Current witness path.
-    } catch {
-      $currentShare = $null
+  $quorum = Get-ClusterQuorum -Cluster $module.Params.cluster_name -ErrorAction Stop
+  $resource = $quorum.QuorumResource
+  $currentPath = $null
+  $isFileWitness = $false
+
+  if ($null -ne $resource) {
+    $isFileWitness = $resource.ResourceType -eq 'File Share Witness'
+    if ($isFileWitness) {
+      $currentPath = (Get-ClusterParameter -InputObject $resource -Name SharePath -ErrorAction SilentlyContinue).Value
     }
   }
 
-  $needsChange = $false
-  # Compare current and desired quorum configuration.
-  if ($q.QuorumType -ne $desiredType) {
-    $needsChange = $true
+  if ($useFileWitness) {
+    $needsChange = (-not $isFileWitness) -or ($currentPath -ne $witnessPath)
   }
-  if ($desiredType -eq "NodeAndFileShareMajority") {
-    if (-not $witnessPath) {
-      $module.FailJson("witness_path must be set when quorum mode requires a file share witness.")
-    }
-    if ($currentShare -ne $witnessPath) {
-      $needsChange = $true
-    }
+  else {
+    $needsChange = $null -ne $resource
   }
 
-  if ($needsChange) {
-    if ($desiredType -eq "NodeMajority") {
-      Set-ClusterQuorum -Cluster $module.Params.cluster_name -NodeMajority -ErrorAction Stop # Set node majority.
-    } else {
-      Set-ClusterQuorum -Cluster $module.Params.cluster_name -NodeAndFileShareMajority -FileShareWitness $witnessPath -ErrorAction Stop # Set file share witness.
-    }
-    $module.Result.changed = $true
+  $module.Result.changed = $needsChange
+
+  if (-not $needsChange -or $module.CheckMode) {
+    $module.ExitJson()
   }
-} catch {
+
+  if ($useFileWitness) {
+    Set-ClusterQuorum -Cluster $module.Params.cluster_name -FileShareWitness $witnessPath -ErrorAction Stop | Out-Null
+  }
+  else {
+    Set-ClusterQuorum -Cluster $module.Params.cluster_name -NoWitness -ErrorAction Stop | Out-Null
+  }
+
+  $module.ExitJson()
+}
+catch {
   $module.FailJson($_.Exception.Message)
 }
-$module.ExitJson()
