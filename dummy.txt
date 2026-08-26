@@ -1,213 +1,423 @@
-Act as a Principal Enterprise Architect specializing in Platform Engineering, Windows Automation, Event-Driven Architecture, Distributed Systems, AIOps, and Enterprise Observability.
+I want you to help me build a prototype data ingestion and analytics platform for Ansible Automation Platform (AAP / Ansible Tower) job and workflow execution data.
 
-I want you to challenge my architecture, improve it, and recommend industry best practices instead of simply agreeing with it.
+I already have:
+1. Access to the AAP/Tower REST API.
+2. API credentials/token.
+3. An existing PowerShell script that queries a single AAP job and extracts job information, job events, host/task information, changed status, failures, unreachable hosts, etc.
+4. WSL where I can run Python, dlt and PostgreSQL.
 
-## Background
+I will provide my existing PowerShell script after this prompt.
 
-We already have a mature Windows automation ecosystem.
+IMPORTANT:
+First analyze the PowerShell script and understand:
+- API endpoints currently being called
+- authentication method
+- pagination logic
+- fields being extracted
+- calculations currently being performed
+- job event structure
+- event_data/res structure
+- changed=true/false detection
+- host/task extraction
 
-Existing platforms include:
+Do not blindly convert PowerShell to Python.
 
-- VMware Aria Automation
-- VMware vCenter / VCF
-- Azure DevOps Pipelines
-- Packer Image Factory
-- Red Hat Ansible Automation Platform
-- Infoblox IPAM/DNS
-- Active Directory
-- CIS Hardening
-- Security Agents
-- Monitoring (Zabbix)
-- CMDB
-- ServiceNow
-- Patch Management
-- Vulnerability Management
+The target architecture should be:
 
-Day-1 provisioning is already highly automated.
+AAP / Tower REST API
+        |
+        v
+Python API extraction
+        |
+        v
+dlt (data load tool)
+        |
+        v
+PostgreSQL
+        |
+        +--> Raw execution/event data
+        +--> Structured workflow/job/task/host data
+        +--> Historical data
+        |
+        v
+SQL views / analytics layer
+        |
+        v
+Future dashboard (Grafana or similar)
 
-Typical flow:
 
-Azure DevOps
-→ Packer
-→ Golden Image
-→ Aria Automation
-→ vCenter
-→ VM Creation
-→ Infoblox IP Allocation
-→ Ansible Base Configuration
-→ Domain Join
-→ Security Agent Installation
-→ CIS Hardening
-→ Monitoring Registration
-→ CMDB Update
-→ Windows Ready
+PHASE 1 - WORKFLOW DISCOVERY
 
-The automation itself already works.
+Currently my PowerShell script works primarily with an individual job ID.
 
-## Problem Statement
+Extend the design so that the starting input can be an AAP Workflow Job ID.
 
-Every platform has its own visibility.
+From the workflow ID, discover all jobs/nodes executed as part of that workflow.
 
-Aria knows deployment.
+The workflow may contain:
+- normal job templates
+- multiple workflow nodes
+- sequential jobs
+- parallel jobs
+- failed jobs
+- successful jobs
+- skipped nodes
 
-vCenter knows infrastructure.
+Build the relationship:
 
-Infoblox knows networking.
+workflow
+    |
+    +-- workflow node
+    |       |
+    |       +-- job
+    |
+    +-- workflow node
+    |       |
+    |       +-- job
+    |
+    +-- workflow node
+            |
+            +-- job
 
-Ansible knows configuration.
+Preserve IDs so the database can reconstruct the complete workflow execution.
 
-Zabbix knows monitoring.
+At minimum preserve:
+workflow_job_id
+workflow_node_id
+job_id
+job_template_id
+job_template_name
 
-Security knows compliance.
 
-No platform understands the complete Windows Service transaction.
+PHASE 2 - JOB INFORMATION
 
-Failures are difficult to investigate because every team sees only its own tool.
+For every job belonging to the workflow collect information including:
 
-Example:
+job_id
+job_name
+job_template
+status
+started
+finished
+elapsed
+created
+modified
+launch_type
 
-Aria reports deployment completed.
+Calculate/retain enough information to determine:
 
-vCenter reports VM powered on.
+job duration
+successful jobs
+failed jobs
+cancelled jobs
+error rate
+success rate
 
-Ansible reports WinRM timeout.
 
-Windows team investigates.
+PHASE 3 - JOB EVENTS
 
-Later we discover DHCP scope exhaustion in Infoblox.
+Retrieve all relevant job_events for every discovered job.
 
-The Windows pipeline was never actually the problem.
+Handle AAP API pagination correctly.
 
-There is no centralized transaction visibility.
+Capture information including, where available:
 
-## My Proposal
+job_id
+event_id
+event
+event_display
+counter
+created
+uuid
+parent_uuid
+task
+task_uuid
+task_action
+role
+play
+play_uuid
+host
+host_id
 
-I DO NOT want another orchestration platform.
+and the complete event_data structure.
 
-I want to build a Windows Automation Control Plane.
+Do NOT throw away fields simply because different Ansible modules return different JSON structures.
 
-This Control Plane sits above the existing tools.
 
-It should:
+PHASE 4 - DYNAMIC ANSIBLE RESULT DATA
 
-- Create a Transaction ID for every Windows service request
-- Propagate the Transaction ID across every automation platform
-- Collect lifecycle events
-- Normalize events
-- Correlate events
-- Maintain one transaction timeline
-- Build quality gates between platforms
-- Identify the actual failure domain
-- Route ownership
-- Produce service KPIs
-- Build a Windows-as-a-Service dashboard
-- Support future autonomous remediation
+This is an important requirement.
 
-The existing platforms continue to perform execution.
+AAP job events contain:
 
-The Control Plane provides intelligence.
+event_data.res
 
-## Architecture Direction
+The structure of "res" changes depending on the Ansible module.
 
-Thinking along the lines of:
+For example a Windows service module might return:
 
-Request
-↓
+{
+  "changed": false,
+  "state": "started",
+  "name": "W3SVC"
+}
 
-Transaction Manager
+Another module might return:
 
-↓
+{
+  "changed": true,
+  "reboot_required": false,
+  "installed_update_count": 4
+}
 
-Event Bus
+Another module may return nested lists/dictionaries.
 
-↓
+I DO NOT want to manually define database columns for every possible Ansible module.
 
-Correlation Engine
+Design the dlt pipeline so that:
+- common fields are structured
+- dynamic module results are preserved
+- nested JSON is not lost
+- PostgreSQL JSONB can be used where appropriate
+- schema evolution does not continuously break ingestion
 
-↓
+Keep the original result payload available for future analysis.
 
-State Machine
 
-↓
+PHASE 5 - HOST METRICS
 
-Quality Gate Engine
+From the events calculate or make it possible to calculate:
 
-↓
+total hosts
+successful hosts
+failed hosts
+unreachable hosts
+changed hosts
+unchanged hosts
 
+I also want to answer:
+
+Which hosts changed?
+Which hosts failed?
+Which hosts were unreachable?
+Which tasks changed a host?
+Which module caused the change?
+
+
+PHASE 6 - TASK METRICS
+
+Capture enough information to determine:
+
+total tasks
+successful tasks
+failed tasks
+skipped tasks
+changed tasks
+unchanged tasks
+
+For each task I should eventually be able to query:
+
+workflow
+ -> job
+    -> host
+       -> task
+          -> module
+             -> result
+
+
+PHASE 7 - WORKFLOW KPIs
+
+Ultimately I want SQL to produce metrics such as:
+
+Workflow ID
+Workflow name
+Workflow status
+Workflow duration
+
+Number of jobs
+Successful jobs
+Failed jobs
+
+Total hosts
+Successful hosts
+Failed hosts
+Unreachable hosts
+
+Total tasks
+Successful tasks
+Failed tasks
+Changed tasks
+Skipped tasks
+
+Changed hosts
+Unchanged hosts
+
+Overall workflow success rate
+Job success rate
+Host success rate
+Task success rate
+
+Also preserve timestamps so these metrics can be trended historically.
+
+
+PHASE 8 - DATABASE MODEL
+
+Do not put everything into one giant table.
+
+Propose a PostgreSQL model appropriate for this data.
+
+Something conceptually similar to:
+
+workflow_runs
+      |
+      +---- workflow_nodes
+                 |
+                 +---- job_runs
+                           |
+                           +---- job_events
+                           |
+                           +---- host_results
+                           |
+                           +---- task_results
+
+But determine the best schema based on actual AAP API data.
+
+Use IDs and foreign-key relationships where practical.
+
+Keep raw/dynamic JSON where normalization would create unnecessary complexity.
+
+
+PHASE 9 - DLT
+
+Use the Python "dlt" data load tool as the ingestion framework.
+
+I want dlt to handle as much as reasonably possible:
+
+API extraction
+pagination
+schema inference
+nested JSON handling
+schema evolution
+PostgreSQL loading
+incremental ingestion
+merge/upsert/deduplication
+
+Do not reinvent functionality that dlt already provides.
+
+
+PHASE 10 - INCREMENTAL INGESTION
+
+This will eventually run continuously.
+
+Do not reload every historical workflow every time.
+
+Design for incremental ingestion.
+
+For example:
+
+AAP
+ |
+ | new workflow executions
+ v
+dlt
+ |
+ | merge/upsert
+ v
+PostgreSQL
+
+Use stable AAP IDs as appropriate.
+
+Re-running ingestion for the same workflow/job/event must NOT create duplicate records.
+
+However, a workflow that was "running" during one collection and later becomes "successful" or "failed" must be updated correctly.
+
+
+PHASE 11 - RAW VS ANALYTICS DATA
+
+Separate ingestion from analytics.
+
+I prefer:
+
+AAP
+ |
+ v
+RAW / FACT DATA
+ |
+ v
+PostgreSQL
+ |
+ +--> SQL views
+ +--> KPI calculations
+ +--> trend calculations
+ |
+ v
 Dashboard
 
-↓
+Do NOT calculate every KPI permanently inside the extraction script if it can be derived reliably from stored data.
 
-Analytics
+The extraction layer should primarily collect accurate source data.
 
-↓
+SQL/views should perform reporting calculations where appropriate.
 
-Future Auto Remediation
 
-NOT another deployment engine.
+PHASE 12 - PROTOTYPE
 
-## I want your help with the following
+This is initially a WSL prototype.
 
-1. Critique this architecture.
+Please build it incrementally.
 
-2. Compare it with industry best practices.
+Step 1:
+Analyze my PowerShell script.
 
-3. Compare it against OpenTelemetry, Service Mesh, Distributed Tracing, Event Driven Architecture and Platform Engineering patterns.
+Step 2:
+Identify the AAP API endpoints required for:
+- workflow
+- workflow nodes
+- jobs
+- job events
 
-4. Identify architectural weaknesses.
+Step 3:
+Propose PostgreSQL schema.
 
-5. Suggest improvements.
+Step 4:
+Create minimal Python+dlt project structure.
 
-6. Recommend technologies.
+Step 5:
+Test with ONE workflow ID.
 
-7. Recommend event schemas.
+Step 6:
+Load it into PostgreSQL.
 
-8. Recommend transaction lifecycle states.
+Step 7:
+Give me SQL queries to validate:
+- workflow
+- jobs
+- hosts
+- tasks
+- failures
+- unreachable
+- changed=true
 
-9. Recommend quality gates.
+Step 8:
+Only after this works, implement incremental collection of multiple workflows.
 
-10. Recommend governance.
+IMPORTANT DEVELOPMENT RULES:
 
-11. Recommend service KPIs.
+- Keep the implementation simple enough for a prototype.
+- Do not over-engineer.
+- Explain each architectural decision.
+- Preserve original AAP IDs.
+- Preserve raw event/result JSON.
+- Never expose API credentials in source code.
+- Use environment variables/.env or dlt secrets.
+- Handle pagination.
+- Handle API failures and retries.
+- Make ingestion idempotent.
+- Do not assume every event has the same event_data/res schema.
+- Do not invent AAP API fields; validate them against the data returned by my existing script/API.
+- Reuse the working authentication/API logic from my PowerShell implementation where appropriate.
+- Before generating large amounts of code, show me the proposed architecture, table relationships, API calls and project structure.
 
-12. Recommend dashboard layout.
+Here is my existing PowerShell script:
 
-13. Recommend how to demonstrate this as a Proof of Concept.
-
-14. Recommend an MVP that can be built within 3-4 weeks.
-
-15. Recommend how to evolve this into Windows Platform Engineering.
-
-16. Recommend how this framework could eventually support Linux, Kubernetes and Database services.
-
-17. Recommend how large enterprises implement similar patterns.
-
-18. Compare this design with Backstage, OpenTelemetry, Event Driven Ansible, Azure Event Hubs, Kafka, Grafana Tempo, Elastic Observability and ServiceNow Event Management.
-
-19. Suggest if this architecture can become a reusable Enterprise Automation Framework instead of only a Windows framework.
-
-20. Finally, produce a phased roadmap:
-
-Phase 1
-Proof of Concept
-
-Phase 2
-Pilot
-
-Phase 3
-Production
-
-Phase 4
-Enterprise Scale
-
-Do not simply agree with my ideas.
-
-Challenge assumptions.
-
-Think like a CTO, Distinguished Engineer and Enterprise Architect.
-
-Where appropriate, recommend simpler alternatives.
-
-Where appropriate, explain why my idea is good or why it should be changed.
-
-Focus on enterprise architecture rather than implementation code.
+[PASTE POWERSHELL SCRIPT HERE]
