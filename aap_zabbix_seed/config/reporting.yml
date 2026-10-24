@@ -1,0 +1,18 @@
+reporting:
+  enabled: true
+  debug: true
+  jobs:
+    "Windows Desired State": desired_state
+  inventories:
+    "Windows Production": prod
+    "Windows Acceptance": acc
+    "Windows Test": test
+    "Windows Development": dev
+  allowed_domains:
+    - domain_a
+    - domain_b
+zabbix:
+  url: "https://zabbix.example.invalid/api_jsonrpc.php"
+  host: "AAP-MONITORING"
+  timeout_seconds: 5
+  verify_tls: true
