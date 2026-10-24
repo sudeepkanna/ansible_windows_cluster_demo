@@ -1,2 +1,0 @@
-ansible-core>=2.16,<2.20
-PyYAML>=6,<7

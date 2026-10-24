@@ -1,1 +1,0 @@
-Provisioning is intentionally not automatic; see README for manually creating the Zabbix test host and trapper item.
