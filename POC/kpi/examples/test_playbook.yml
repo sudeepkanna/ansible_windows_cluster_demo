@@ -1,0 +1,15 @@
+---
+- name: AAP KPI local smoke test
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Show job metadata
+      ansible.builtin.debug:
+        msg: "{{ awx_job_id }} / {{ awx_job_template_name }} / {{ awx_inventory_name }} / {{ domain_id }}"
+    - name: Produce changed result
+      ansible.builtin.command: /bin/true
+      changed_when: true
+    - name: Produce skipped result
+      ansible.builtin.debug:
+        msg: skipped
+      when: false

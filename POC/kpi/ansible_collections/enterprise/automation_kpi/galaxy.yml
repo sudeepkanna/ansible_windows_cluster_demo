@@ -1,0 +1,11 @@
+namespace: enterprise
+name: automation_kpi
+version: 0.1.0
+readme: README.md
+authors:
+  - Infrastructure Automation Team
+description: Aggregate AAP execution KPIs and publish to Zabbix
+license:
+  - MIT
+tags: [ansible, aap, zabbix, monitoring]
+dependencies: {}

@@ -1,0 +1,26 @@
+# Replace sample mappings with actual AAP job template/inventory/domain values.
+reporting:
+  enabled: true
+  debug: true
+  jobs:
+    "Windows Desired State": desired_state
+    "Windows Patching": patching
+    "Windows Provisioning": provisioning
+  inventories:
+    "Windows Production": prod
+    "Windows Acceptance": acc
+    "Windows Test": test
+    "Windows Development": dev
+  allowed_domains: [domain_a, domain_b, domain_c, domain_d]
+  # Only numeric scalar fields from explicitly named tasks. No stdout capture.
+  selected_tasks: {}
+  # Example:
+  # selected_tasks:
+  #   "Check Windows agent compliance":
+  #     fields: [compliant_count, noncompliant_count]
+zabbix:
+  url: "https://zabbix.example.invalid/api_jsonrpc.php"
+  host: "AAP-MONITORING"
+  key_prefix: "aap.job.raw"
+  timeout_seconds: 5
+  verify_tls: true
